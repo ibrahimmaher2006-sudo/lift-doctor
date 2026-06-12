@@ -6,7 +6,7 @@ class TrendDetector:
     """Learns a channel's normal behavior from its first N hours,
     then flags deviations and abnormal trends."""
 
-    def __init__(self, train_hours=6, z_limit=3.0, slope_limit=3.0):
+    def __init__(self, train_hours=12, z_limit=3.0, slope_limit=3.0):
         self.train_minutes = train_hours * 60
         self.z_limit = z_limit
         self.slope_limit = slope_limit
@@ -19,8 +19,14 @@ class TrendDetector:
         slope = series.diff().rolling(30).mean()         # trend per minute
         slope_z = slope / slope.rolling(60).std().iloc[:self.train_minutes].mean()
 
+        # Raw flag: any single suspicious minute
+        raw = (z.abs() > self.z_limit) | (slope_z.abs() > self.slope_limit)
+
+        # Persistence filter: only alert if 8 of the last 10 minutes are suspicious
+        sustained = raw.rolling(10).sum() >= 8
+
         return pd.DataFrame({
             "value": series,
             "z_score": z,
-            "anomaly": (z.abs() > self.z_limit) | (slope_z.abs() > self.slope_limit),
+            "anomaly": sustained.fillna(False),
         })
