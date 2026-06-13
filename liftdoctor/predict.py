@@ -15,16 +15,20 @@ def _load():
 
 
 def _prep_one_window(window, bundle):
-    """Turn one window of raw sensor data into a model-ready feature row."""
-    feats = summarize_window(window)                 # same features as training
-    row = pd.DataFrame([feats]).reindex(columns=bundle["feature_cols"])
-    # apply the SAME clipping + scaling learned at training time
+    """Turn one window of raw sensor data into a model-ready feature row.
+    Keeps column names intact all the way through (critical for correctness)."""
+    feats = summarize_window(window)
+    cols = bundle["feature_cols"]
+    # Build a one-row frame in EXACTLY the training column order
+    row = pd.DataFrame([feats]).reindex(columns=cols)
     row = row.replace([np.inf, -np.inf], np.nan)
-    for col in bundle["feature_cols"]:
+    for col in cols:
         lo, hi = bundle["clip_bounds"][col]
         row[col] = row[col].clip(lo, hi)
     row = row.fillna(-999)
-    return bundle["scaler"].transform(row).astype("float32")
+    # Scale, then REBUILD a named DataFrame so the model sees feature names
+    scaled = bundle["scaler"].transform(row)
+    return pd.DataFrame(scaled, columns=cols)
 
 
 def predict_file(filepath, window_sec=300, confidence=0.50):
@@ -39,23 +43,43 @@ def predict_file(filepath, window_sec=300, confidence=0.50):
         probs = bundle["model"].predict_proba(X)[0]
         top = probs.argmax()
         event = bundle["model"].classes_[top]
-        conf = probs[top]
+        conf = float(probs[top])
         name = bundle["event_names"][event]
         if conf < confidence:
             name = "Uncertain"
-        results.append((start, name, round(float(conf), 3)))
+        results.append((start, name, round(conf, 3)))
     return results
 
 
-def diagnose(filepath, confidence=0.50):
-    """Give one overall diagnosis for a well file (most common confident call)."""
+def diagnose(filepath, confidence=0.50, min_fault_windows=3):
+    """Diagnose a well like an operator: report the FAULT that developed,
+    not the most common state. A few confident fault windows = a finding."""
     results = predict_file(filepath, confidence=confidence)
-    confident = [r[1] for r in results if r[1] != "Uncertain"]
+    confident = [(s, name, c) for s, name, c in results if name != "Uncertain"]
     if not confident:
         return "Uncertain — no confident diagnosis", results
-    verdict = pd.Series(confident).mode().iloc[0]
-    share = confident.count(verdict) / len(confident)
-    return f"{verdict} (in {share:.0%} of confident windows)", results
+
+    # Separate normal windows from actual faults
+    fault_windows = [(s, name, c) for s, name, c in confident if name != "Normal"]
+
+    # Count each fault type; require a minimum to avoid one-off noise
+    from collections import Counter
+    fault_counts = Counter(name for _, name, _ in fault_windows)
+    real_faults = {f: n for f, n in fault_counts.items() if n >= min_fault_windows}
+
+    if not real_faults:
+        return "Normal — no significant fault detected", results
+
+    # The dominant fault is the diagnosis
+    top_fault = max(real_faults, key=real_faults.get)
+
+    # WHEN did it first appear? (early detection — the valuable part)
+    onset = next(s for s, name, c in fault_windows if name == top_fault)
+    n_fault = real_faults[top_fault]
+    onset_hr = onset / 3600
+
+    return (f"{top_fault} — detected at t={onset}s (hour {onset_hr:.1f}), "
+            f"sustained over {n_fault} windows"), results
 
 
 if __name__ == "__main__":
