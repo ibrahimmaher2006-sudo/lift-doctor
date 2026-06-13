@@ -19,14 +19,34 @@ X_train, X_test, y_train, y_test = train_test_split(
 model = RandomForestClassifier(n_estimators=200, random_state=0)
 model.fit(X_train, y_train)
 
-# 4. Test it on the unseen wells
-preds = model.predict(X_test)
-print("=== How well it names failures it's never seen ===\n")
-print(classification_report(y_test, preds))
-print("Confusion matrix (rows=truth, cols=guess):")
+# 4. Test it on the unseen wells — WITH a confidence threshold
+CONFIDENCE = 0.55   # below this, the model says "uncertain" instead of guessing
+
+probs = model.predict_proba(X_test)
+top_prob = probs.max(axis=1)               # how confident the top guess is
+raw_preds = model.classes_[probs.argmax(axis=1)]
+preds = [p if c >= CONFIDENCE else "uncertain"
+         for p, c in zip(raw_preds, top_prob)]
+
+print("=== Performance WITH confidence threshold ===\n")
+
+# How often does it abstain, and is it right when it commits?
+committed = [(t, p) for t, p in zip(y_test, preds) if p != "uncertain"]
+n_uncertain = preds.count("uncertain")
+n_committed = len(committed)
+correct = sum(1 for t, p in committed if t == p)
+
+print(f"Confidence threshold: {CONFIDENCE}")
+print(f"Abstained (said 'uncertain'): {n_uncertain}/{len(preds)} "
+      f"({100*n_uncertain/len(preds):.0f}%)")
+print(f"Accuracy WHEN it committed: {correct}/{n_committed} "
+      f"({100*correct/n_committed:.0f}%)\n")
+
+print("Confusion matrix including 'uncertain' column:")
+labels = list(model.classes_) + ["uncertain"]
 print(pd.DataFrame(
-    confusion_matrix(y_test, preds, labels=model.classes_),
-    index=model.classes_, columns=model.classes_,
+    confusion_matrix(y_test, preds, labels=labels),
+    index=labels, columns=labels,
 ))
 
 # 5. Save the trained model for the dashboard to use later
