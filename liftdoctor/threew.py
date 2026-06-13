@@ -110,7 +110,7 @@ def build_dataset(files_per_event=15, window_sec=300, seed=0):
 
 
 if __name__ == "__main__":
-    data = build_dataset(files_per_event=60)
+    data = build_dataset(files_per_event=60, window_sec=300, seed=0)
     out = "data/threew_features.csv"
     data.to_csv(out, index=False)
     print(f"\nSaved to {out}")
