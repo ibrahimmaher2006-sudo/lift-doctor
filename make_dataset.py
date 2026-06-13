@@ -8,12 +8,13 @@ FAILURES = [None, "gas_lock", "pump_wear", "tubing_leak"]
 TRAIN_MIN = 12 * 60   # baseline = first 12 hours
 
 
-def extract_features(df):
-    """Boil a 24h well history down to one row of numbers."""
+def extract_features(df, start_min):
+    """Boil a well history down to one row of numbers,
+    looking only at the first hour after failure onset."""
     feats = {}
     for ch in CHANNELS:
         base = df[ch].iloc[:TRAIN_MIN]
-        late = df[ch].iloc[-120:]                      # last 2 hours
+        late = df[ch].iloc[start_min:start_min + 60]   # first hour after onset
         mu, sigma = base.mean(), base.std()
         feats[f"{ch}_shift"] = (late.mean() - mu) / sigma     # how far it moved
         feats[f"{ch}_slope"] = np.polyfit(range(len(late)), late, 1)[0]  # trend
@@ -29,7 +30,7 @@ def main(n_wells=600, out="data/training.csv"):
         start_hr = int(rng.integers(14, 21))
         well = ESPWell(seed=int(rng.integers(0, 1_000_000)))
         df = well.generate(hours=24, failure=failure, failure_start_hr=start_hr)
-        feats = extract_features(df)
+        feats = extract_features(df, start_hr * 60)
         feats["label"] = failure or "healthy"
         rows.append(feats)
         if (i + 1) % 100 == 0:

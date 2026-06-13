@@ -26,7 +26,8 @@ class ESPWell:
         vibration = 0.15 + self.rng.normal(0, 0.02, n)
 
         # Variable severity: each well fails by a different amount
-        sev = self.rng.uniform(0.5, 1.5) if messy else 1.0
+        # Wider severity incl. very weak failures that barely show
+        sev = self.rng.uniform(0.15, 1.3) if messy else 1.0
 
         if failure == "gas_lock":
             intake_psi[start:] -= np.linspace(0, 200 * sev, dur)
