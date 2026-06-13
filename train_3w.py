@@ -33,9 +33,33 @@ feature_cols = [c for c in data.columns
 X = data[feature_cols]
 y = data["event"]
 
-# 4. Handle missing sensors: fill NaN with a sentinel the model can use.
-#    Real wells lack some sensors; -999 lets the model learn "sensor absent".
+# 4. Clean AND scale the features — real sensors have wildly different scales
+#    (some in single digits, P-TPT in billions). We fix overflow + normalize.
+import numpy as np
+
+# 4a. Replace infinities with NaN
+X = X.replace([np.inf, -np.inf], np.nan)
+
+# 4b. Clip extreme values per feature (winsorize at 0.1 / 99.9 percentile)
+for col in X.columns:
+    lo, hi = X[col].quantile(0.001), X[col].quantile(0.999)
+    X[col] = X[col].clip(lo, hi)
+
+# 4c. Fill missing-sensor gaps BEFORE scaling (sentinel for "absent")
 X = X.fillna(-999)
+
+# 4d. Scale every feature to mean 0, std 1 — fixes float32 overflow AND
+#     puts billion-scale pressures and single-digit temps on equal footing.
+from sklearn.preprocessing import StandardScaler
+scaler = StandardScaler()
+X = pd.DataFrame(
+    scaler.fit_transform(X).astype("float32"),   # force float32 now, safely
+    columns=X.columns, index=X.index,
+)
+
+# 4e. Final safety check in the SAME dtype sklearn will use
+assert np.isfinite(X.values).all(), "Still have non-finite values after scaling!"
+print("Features cleaned and scaled to comparable ranges (float32-safe).")
 
 # 5. Split by SOURCE FILE so no well appears in both train and test.
 #    This prevents data leakage — the model must generalize to unseen wells.
@@ -71,7 +95,7 @@ target_names = [EVENT_NAMES[i] for i in present]
 
 print("\n=== Performance on real offshore well data ===\n")
 print(classification_report(y_test, preds, labels=present,
-                            target_names=target_names))
+                            target_names=target_names, zero_division=0))
 
 print("Confusion matrix (rows=truth, cols=guess):")
 cm = pd.DataFrame(
