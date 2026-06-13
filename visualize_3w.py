@@ -38,3 +38,15 @@ for f in files_to_use:
     x = range(len(df))
     for ax, col in zip(axes[:-1], sensor_cols):
         ax.plot(x, df[col].values, linewidth=0.6)
+        ax.set_ylabel(col, fontsize=8)
+        ax.grid(alpha=0.3)
+
+    # Bottom panel: the class label over time (the "truth")
+    axes[-1].plot(x, df["class"].values, color="red", linewidth=1)
+    axes[-1].set_ylabel("class", fontsize=8)
+    axes[-1].set_xlabel("Time (seconds)")
+    axes[-1].grid(alpha=0.3)
+
+    fig.suptitle(f"{EVENT_NAMES[EVENT]} — {f.name}", fontsize=11)
+    plt.tight_layout()
+    plt.show()
