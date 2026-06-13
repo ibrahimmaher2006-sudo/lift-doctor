@@ -37,10 +37,22 @@ y = data["event"]
 #    Real wells lack some sensors; -999 lets the model learn "sensor absent".
 X = X.fillna(-999)
 
-# 5. Split train/test, keeping class proportions (stratify)
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=0, stratify=y
-)
+# 5. Split by SOURCE FILE so no well appears in both train and test.
+#    This prevents data leakage — the model must generalize to unseen wells.
+from sklearn.model_selection import GroupShuffleSplit
+
+groups = data["source_file"]
+gss = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=0)
+train_idx, test_idx = next(gss.split(X, y, groups))
+
+X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
+y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
+
+# Sanity check: confirm no file leaked across the split
+train_files = set(data.iloc[train_idx]["source_file"])
+test_files = set(data.iloc[test_idx]["source_file"])
+print(f"\nTrain files: {len(train_files)}, Test files: {len(test_files)}")
+print(f"Overlap (must be 0): {len(train_files & test_files)}")
 
 # 6. Train with class_weight='balanced' to fight imbalance
 print("\nTraining Random Forest (this may take a minute)...")
