@@ -51,39 +51,41 @@ def predict_file(filepath, window_sec=300, confidence=0.50):
     return results
 
 
-def diagnose(filepath, confidence=0.50, min_fault_windows=3):
-    """Diagnose a well like an operator: report the FAULT that developed,
-    not the most common state. A few confident fault windows = a finding."""
+def diagnose(filepath, confidence=0.50, min_consecutive=3):
+    """Diagnose like an operator: report the FAULT that developed, and when.
+    A fault must persist for several windows IN A ROW (real faults are
+    sustained; scattered misclassifications are noise). Biased toward
+    catching real faults while rejecting isolated false positives."""
     results = predict_file(filepath, confidence=confidence)
-    confident = [(s, name, c) for s, name, c in results if name != "Uncertain"]
-    if not confident:
-        return "Uncertain — no confident diagnosis", results
 
-    # Separate normal windows from actual faults
-    fault_windows = [(s, name, c) for s, name, c in confident if name != "Normal"]
+    # Walk the timeline; find the first run of >= min_consecutive same-fault windows
+    best_fault, best_onset, best_len = None, None, 0
+    run_name, run_start, run_len = None, None, 0
 
-    # Count each fault type; require a minimum to avoid one-off noise
-    from collections import Counter
-    fault_counts = Counter(name for _, name, _ in fault_windows)
-    real_faults = {f: n for f, n in fault_counts.items() if n >= min_fault_windows}
+    for start, name, conf in results:
+        if name == run_name and name not in ("Normal", "Uncertain"):
+            run_len += 1
+        else:
+            run_name, run_start, run_len = name, start, 1
+        # Track the longest qualifying fault run
+        if (run_name not in ("Normal", "Uncertain")
+                and run_len >= min_consecutive
+                and run_len > best_len):
+            best_fault, best_onset, best_len = run_name, run_start, run_len
 
-    if not real_faults:
+    if best_fault is None:
         return "Normal — no significant fault detected", results
 
-    # The dominant fault is the diagnosis
-    top_fault = max(real_faults, key=real_faults.get)
-
-    # WHEN did it first appear? (early detection — the valuable part)
-    onset = next(s for s, name, c in fault_windows if name == top_fault)
-    n_fault = real_faults[top_fault]
-    onset_hr = onset / 3600
-
-    return (f"{top_fault} — detected at t={onset}s (hour {onset_hr:.1f}), "
-            f"sustained over {n_fault} windows"), results
+    # Total windows of this fault (for context), and onset time
+    total = sum(1 for _, n, _ in results if n == best_fault)
+    onset_hr = best_onset / 3600
+    return (f"{best_fault} — onset at t={best_onset}s (hour {onset_hr:.1f}), "
+            f"sustained {best_len}+ consecutive windows ({total} total)"), results
 
 
 if __name__ == "__main__":
     import sys
+    from liftdoctor.explain import explain
     f = sys.argv[1] if len(sys.argv) > 1 else None
     if not f:
         print("Usage: python -m liftdoctor.predict <path-to-well-file.parquet>")
@@ -91,6 +93,16 @@ if __name__ == "__main__":
         verdict, detail = diagnose(f)
         print(f"\nFile: {Path(f).name}")
         print(f"DIAGNOSIS: {verdict}\n")
-        print("Window-by-window:")
-        for start, name, conf in detail[:20]:
-            print(f"  t={start:5d}s : {name:25s} (conf {conf})")
+
+        # Extract fault name + onset from the results for the explainer
+        faults = [(s, n) for s, n, c in detail if n not in ("Normal", "Uncertain")]
+        if faults:
+            # find the dominant fault and its first appearance
+            from collections import Counter
+            top = Counter(n for _, n in faults).most_common(1)[0][0]
+            onset = next(s for s, n in faults if n == top)
+            print("=" * 60)
+            print(explain(f, verdict, onset, top))
+            print("=" * 60)
+        else:
+            print(explain(f, verdict, 0, "Normal"))
