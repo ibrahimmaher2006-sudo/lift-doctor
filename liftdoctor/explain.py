@@ -12,7 +12,7 @@ FAULT_PROFILES = {
     "BSW increase": {
         "watch": ["P-MON-CKP", "T-TPT", "QGL"],
         "summary": "rising water cut (BSW) in the produced fluid",
-        "physics": "increasing water fraction changes flow density and "
+        "physics": "an increasing water fraction altering flow density and "
                    "wellhead conditions",
         "action": "Verify water cut via sampling; review the well's water "
                   "management and consider rate or lift adjustments.",
@@ -92,19 +92,20 @@ FAULT_PROFILES = {
 
 
 def _sensor_evidence(df, onset_sec, window_sec=300):
-    """Compare sensor behavior BEFORE vs AT the fault onset.
-    Returns a dict of sensor -> percent change, for sensors that have data."""
-    onset_row = onset_sec
-    # 'before' = the 10 minutes leading into onset; 'at' = the onset window
-    before = df.iloc[max(0, onset_row - 600):onset_row]
-    at = df.iloc[onset_row:onset_row + window_sec]
+    """Compare sensor behavior BEFORE vs AFTER the fault onset.
+    Uses a wider 'after' window so gradual faults still show evidence."""
+   # 'before' = the well's healthy baseline (first 30 min of the record);
+    # 'after' = 30 min from fault onset. For slow faults, this captures the
+    # cumulative drift that a narrow before/after window misses.
+    before = df.iloc[0:1800]
+    after = df.iloc[onset_sec:onset_sec + 1800]
     evidence = {}
     for col in df.columns:
         if col in ("class", "state"):
             continue
-        if before[col].notna().sum() > 5 and at[col].notna().sum() > 5:
+        if before[col].notna().sum() > 5 and after[col].notna().sum() > 5:
             b = before[col].mean()
-            a = at[col].mean()
+            a = after[col].mean()
             if b != 0 and not np.isnan(b) and not np.isnan(a):
                 evidence[col] = (a - b) / abs(b) * 100
     return evidence
@@ -126,7 +127,7 @@ def explain(filepath, diagnosis_str, onset_sec, fault_name, confidence_note=""):
     # Describe the most-moved watched sensors
     moves = []
     for s in profile["watch"]:
-        if s in evidence and abs(evidence[s]) >= 10:   # only notable moves
+        if s in evidence and abs(evidence[s]) >= 5:   # only notable moves
             direction = "rose" if evidence[s] > 0 else "fell"
             moves.append(f"{s} {direction} {abs(evidence[s]):.0f}%")
 

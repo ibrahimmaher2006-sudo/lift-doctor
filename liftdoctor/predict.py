@@ -74,13 +74,14 @@ def diagnose(filepath, confidence=0.50, min_consecutive=3):
             best_fault, best_onset, best_len = run_name, run_start, run_len
 
     if best_fault is None:
-        return "Normal — no significant fault detected", results
+        return "Normal — no significant fault detected", results, (None, None)
 
     # Total windows of this fault (for context), and onset time
     total = sum(1 for _, n, _ in results if n == best_fault)
     onset_hr = best_onset / 3600
-    return (f"{best_fault} — onset at t={best_onset}s (hour {onset_hr:.1f}), "
-            f"sustained {best_len}+ consecutive windows ({total} total)"), results
+    msg = (f"{best_fault} — onset at t={best_onset}s (hour {onset_hr:.1f}), "
+           f"sustained {best_len}+ consecutive windows ({total} total)")
+    return msg, results, (best_fault, best_onset)
 
 
 if __name__ == "__main__":
@@ -90,19 +91,12 @@ if __name__ == "__main__":
     if not f:
         print("Usage: python -m liftdoctor.predict <path-to-well-file.parquet>")
     else:
-        verdict, detail = diagnose(f)
+        verdict, detail, (fault_name, onset) = diagnose(f)
         print(f"\nFile: {Path(f).name}")
         print(f"DIAGNOSIS: {verdict}\n")
-
-        # Extract fault name + onset from the results for the explainer
-        faults = [(s, n) for s, n, c in detail if n not in ("Normal", "Uncertain")]
-        if faults:
-            # find the dominant fault and its first appearance
-            from collections import Counter
-            top = Counter(n for _, n in faults).most_common(1)[0][0]
-            onset = next(s for s, n in faults if n == top)
-            print("=" * 60)
-            print(explain(f, verdict, onset, top))
-            print("=" * 60)
+        print("=" * 60)
+        if fault_name:
+            print(explain(f, verdict, onset, fault_name))
         else:
             print(explain(f, verdict, 0, "Normal"))
+        print("=" * 60)
